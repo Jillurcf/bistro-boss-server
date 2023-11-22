@@ -227,6 +227,7 @@ async function run() {
 
     app.post('/payments', async(req, res)=>{
       const payment = req.body;
+      payment.menuItemIds = payment.menuItemIds.map(id => new ObjectId(id));
       const paymentResult = await paymentCollection.insertOne(payment);
 
       // carefully delete each item from the cart
@@ -239,7 +240,7 @@ async function run() {
     })
   
     // stats analylics
-    app.get('/admin-stats', async(req, res)=>{
+    app.get('/admin-stats', async (req, res)=>{
       const users = await userCollection.estimatedDocumentCount();
       const menuItems =await menuCollection.estimatedDocumentCount();
       const orders = await paymentCollection.estimatedDocumentCount();
@@ -267,6 +268,59 @@ async function run() {
         revenue 
       })
     })
+
+
+// order status
+/***
+ * ------------------------------
+ * NON efficient way
+ * ----------------------------
+ * load all the payment
+ * for every menuItemsIds (which is an array), go find the item from menu collection
+ * for every item in the menu collection that you found from a payment entry (document)
+ * 
+ * 
+ * 
+ */
+
+// using aggregate pipeline
+app.get('/order-stats',verifyToken, verifyAdmin, async(req, res)=>{
+  const result = await paymentCollection.aggregate([
+    {
+      $unwind: '$menuItemIds',
+    },
+    {
+      $lookup: {
+        from: 'menu',
+        localField: 'menuItemIds',
+        foreignField: '_id',
+        as: 'menuItems'
+      }
+    },
+    {
+      $unwind: '$menuItems'
+    },
+    {
+      $group: {
+        _id: '$menuItems.category',
+        quantity: { $sum: 1 },
+        revenue: { $sum: '$menuItems.price'}
+      }
+      
+    },
+    {
+      $project: {
+        _id: 0,
+        category: '$_id',
+        quantity: '$quantity',
+        revenue: '$revenue'
+      }
+    }
+  ]).toArray();
+  
+  
+  res.send(result);
+})
 
     // Send a ping to confirm a successful connection
     // await client.db("admin").command({ ping: 1 });
